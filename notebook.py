@@ -21,11 +21,13 @@ def title(mo):
     mo.md(r"""
     # The Scale DyT Forgot
 
-    LayerNorm has a theorem behind it. DyT has a fitted curve.
+    LayerNorm has a theorem behind it. DyT has a fitted curve. **This notebook asks what that missing theorem costs when the input scale moves, and answers with a trained model you can push around.**
 
     **Paper:** ["Transformers without Normalization"](https://www.alphaxiv.org/abs/2503.10622) (Zhu, Chen, He, Yu, Yuille, LeCun, 2025, arXiv 2503.10622) replaces every LayerNorm in a transformer with one line: $\mathrm{DyT}(x) = \tanh(\alpha x) \odot \gamma + \beta$, where $\alpha$ is a single learned number per layer. It matches or beats LayerNorm across a wide range of benchmarks, and it is simpler and faster to run.
 
     It also gives up a property LayerNorm has for free: $\mathrm{LN}(cx) = \mathrm{LN}(x)$ for any positive constant $c$, exactly, by algebra. Rescale the input to a LayerNorm and nothing downstream notices. Rescale the input to a DyT layer and $\alpha$, frozen the moment training ends, has no way to react. Below, we train a tiny transformer twice on the same task, once with each kind of layer, then push the input off the scale it trained on and watch what breaks, and what doesn't.
+
+    Why it matters: activation scale is exactly the thing that moves in deployment, through quantization, precision changes, domain shift, and long-context drift. A normalization layer that is only calibrated to one scale is a bet that none of those happen. This notebook measures the bet. (The paper's page on alphaXiv also has an AI summary and a discussion tab if you want the fast overview before the deep dive.)
     """)
 
     return
@@ -829,6 +831,68 @@ def setup_md(mo):
     return
 
 
+@app.cell(hide_code=True)
+def reader_guide(mo):
+    mo.callout(
+        mo.md(
+            "**How to read this notebook.** Everything below is computed live by a model "
+            "trained in this kernel. Drag the red puck on the accuracy map to stress the "
+            "trained models; the three panels underneath react instantly (they index a "
+            "precomputed grid, so no training run ever blocks a drag). Code is folded "
+            "where it is plumbing; click the eye icon on any cell to open it."
+        ),
+        kind="info",
+    )
+
+    return
+
+
+@app.cell(hide_code=True)
+def kpi_tiles(device, mo, np, rescale_grid):
+    # Headline numbers as tiles, all computed from this kernel's own grid.
+    _acc = rescale_grid.accuracy
+    _mi_1x = int(np.argmin(np.abs(rescale_grid.log2_multipliers - 0.0)))
+    mo.hstack(
+        [
+            mo.stat(
+                f"{_acc['layernorm'][-1, 0]:.3f}",
+                label="LayerNorm at 8x scale",
+                caption="invariant, by theorem",
+                bordered=True,
+            ),
+            mo.stat(
+                f"{_acc['dyt'][_mi_1x, 0]:.3f}",
+                label="DyT at training scale",
+                caption="matches LayerNorm here",
+                bordered=True,
+            ),
+            mo.stat(
+                f"{_acc['dyt'][-1, 0]:.3f}",
+                label="DyT at 8x scale",
+                caption="the scale it forgot",
+                direction="decrease",
+                bordered=True,
+            ),
+            mo.stat(
+                f"{_acc['rms_dyt'][-1, 0]:.3f}",
+                label="RMS-DyT at 8x scale",
+                caption="the candidate fix",
+                bordered=True,
+            ),
+            mo.stat(
+                device.type.upper(),
+                label="compute",
+                caption=f"{len(rescale_grid.log2_multipliers)}x{len(rescale_grid.sigmas)} stress grid x 3 models",
+                bordered=True,
+            ),
+        ],
+        gap=0.75,
+        wrap=True,
+    )
+
+    return
+
+
 @app.cell
 def device_setup(default_config, mo, pick_device):
     device = pick_device()
@@ -1356,6 +1420,82 @@ def guardrails(mo):
     - "Exact" invariance for LayerNorm means exact up to the $\epsilon = 10^{-5}$ in its denominator: the measured LayerNorm gaps in panel C sit at floating-point scale, not literally zero.
     - The rescale stress (a global multiplier times an independent per-token lognormal factor) is one specific, simple model of activation-scale drift. Real deployment-time distribution shift can look different: precision changes, sequence-length effects, domain shift, adversarial inputs. The mechanism this notebook demonstrates, a frozen scalar with no way to react to a shifted input scale, is general; the exact numbers are not a benchmark.
     - The depth sweep uses a handful of seeds per configuration, enough to see whether a trend is there, not enough to report a tight confidence interval on it.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def repro_check(mo, np, rescale_grid):
+    # Reproduction and finding check, values read live from this kernel's results.
+    _acc2 = rescale_grid.accuracy
+    _mi0 = int(np.argmin(np.abs(rescale_grid.log2_multipliers - 0.0)))
+    _rows = [
+        (
+            "&#9989;",
+            "alpha learned by gradient descent, never hand-set",
+            "paper's training recipe",
+            "same (see engine)",
+        ),
+        (
+            "&#9989;",
+            "LayerNorm scale invariance LN(cx) = LN(x)",
+            "exact by algebra",
+            f"accuracy {_acc2['layernorm'][-1, 0]:.3f} at 8x scale",
+        ),
+        (
+            "&#9989;",
+            "DyT matches LayerNorm on-distribution",
+            "paper's benchmark claim",
+            f"accuracy {_acc2['dyt'][_mi0, 0]:.3f} at training scale",
+        ),
+        (
+            "&#9888;&#65039;",
+            "DyT under input rescale (NOT tested in the paper)",
+            "no claim made",
+            f"accuracy falls to {_acc2['dyt'][-1, 0]:.3f} at 8x: this notebook's finding",
+        ),
+        (
+            "&#9989;",
+            "RMS-DyT restores invariance",
+            "predicted by the same algebra",
+            f"accuracy {_acc2['rms_dyt'][-1, 0]:.3f} at 8x",
+        ),
+        (
+            "&#9888;&#65039;",
+            "fragility gap vs depth",
+            "plausible hypothesis",
+            "no clean monotonic trend across seeds; reported as measured",
+        ),
+    ]
+    _table = mo.md(
+        chr(10).join(
+            [
+                "### Reproduction check",
+                "",
+                "| | claim | source | measured here |",
+                "|---|---|---|---|",
+                *[f"| {a} | {b} | {c} | {d} |" for a, b, c, d in _rows],
+                "",
+                "Check marks are reproductions of the paper or of the underlying algebra; "
+                "warning rows are this notebook's own measurements beyond the paper's scope.",
+            ]
+        )
+    )
+    _table
+
+    return
+
+
+@app.cell(hide_code=True)
+def closer_refs(mo):
+    mo.md(r"""
+    Every number above came out of this kernel. The fastest way to feel the result is to break it yourself: drag the puck to the far right of the map and watch the histogram slide into the saturation zone. Go do that.
+
+    ### References
+
+    1. Zhu, Chen, He, Yu, Yuille, LeCun. *Transformers without Normalization.* 2025. [alphaXiv 2503.10622](https://www.alphaxiv.org/abs/2503.10622)
+    2. Olsson et al. *In-context Learning and Induction Heads.* 2022. [arXiv 2209.11895](https://www.alphaxiv.org/abs/2209.11895)
+    3. Ba, Kiros, Hinton. *Layer Normalization.* 2016. [arXiv 1607.06450](https://www.alphaxiv.org/abs/1607.06450)
     """)
     return
 

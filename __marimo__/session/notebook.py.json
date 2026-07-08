@@ -7,12 +7,12 @@
   "cells": [
     {
       "id": "Hbol",
-      "code_hash": "cdc33ba575501cf4c151c27edc04fd0b",
+      "code_hash": "90f89341ffecf4b69967d17874b50ca0",
       "outputs": [
         {
           "type": "data",
           "data": {
-            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h1 id=\"the-scale-dyt-forgot\">The Scale DyT Forgot</h1>\n<span class=\"paragraph\">LayerNorm has a theorem behind it. DyT has a fitted curve.</span>\n<span class=\"paragraph\"><strong>Paper:</strong> <a href=\"https://www.alphaxiv.org/abs/2503.10622\" rel=\"noopener noreferrer\" target=\"_blank\">\"Transformers without Normalization\"</a> (Zhu, Chen, He, Yu, Yuille, LeCun, 2025, arXiv 2503.10622) replaces every LayerNorm in a transformer with one line: <marimo-tex class=\"arithmatex\">||(\\mathrm{DyT}(x) = \\tanh(\\alpha x) \\odot \\gamma + \\beta||)</marimo-tex>, where <marimo-tex class=\"arithmatex\">||(\\alpha||)</marimo-tex> is a single learned number per layer. It matches or beats LayerNorm across a wide range of benchmarks, and it is simpler and faster to run.</span>\n<span class=\"paragraph\">It also gives up a property LayerNorm has for free: <marimo-tex class=\"arithmatex\">||(\\mathrm{LN}(cx) = \\mathrm{LN}(x)||)</marimo-tex> for any positive constant <marimo-tex class=\"arithmatex\">||(c||)</marimo-tex>, exactly, by algebra. Rescale the input to a LayerNorm and nothing downstream notices. Rescale the input to a DyT layer and <marimo-tex class=\"arithmatex\">||(\\alpha||)</marimo-tex>, frozen the moment training ends, has no way to react. Below, we train a tiny transformer twice on the same task, once with each kind of layer, then push the input off the scale it trained on and watch what breaks, and what doesn't.</span></span>"
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h1 id=\"the-scale-dyt-forgot\">The Scale DyT Forgot</h1>\n<span class=\"paragraph\">LayerNorm has a theorem behind it. DyT has a fitted curve. <strong>This notebook asks what that missing theorem costs when the input scale moves, and answers with a trained model you can push around.</strong></span>\n<span class=\"paragraph\"><strong>Paper:</strong> <a href=\"https://www.alphaxiv.org/abs/2503.10622\" rel=\"noopener noreferrer\" target=\"_blank\">\"Transformers without Normalization\"</a> (Zhu, Chen, He, Yu, Yuille, LeCun, 2025, arXiv 2503.10622) replaces every LayerNorm in a transformer with one line: <marimo-tex class=\"arithmatex\">||(\\mathrm{DyT}(x) = \\tanh(\\alpha x) \\odot \\gamma + \\beta||)</marimo-tex>, where <marimo-tex class=\"arithmatex\">||(\\alpha||)</marimo-tex> is a single learned number per layer. It matches or beats LayerNorm across a wide range of benchmarks, and it is simpler and faster to run.</span>\n<span class=\"paragraph\">It also gives up a property LayerNorm has for free: <marimo-tex class=\"arithmatex\">||(\\mathrm{LN}(cx) = \\mathrm{LN}(x)||)</marimo-tex> for any positive constant <marimo-tex class=\"arithmatex\">||(c||)</marimo-tex>, exactly, by algebra. Rescale the input to a LayerNorm and nothing downstream notices. Rescale the input to a DyT layer and <marimo-tex class=\"arithmatex\">||(\\alpha||)</marimo-tex>, frozen the moment training ends, has no way to react. Below, we train a tiny transformer twice on the same task, once with each kind of layer, then push the input off the scale it trained on and watch what breaks, and what doesn't.</span>\n<span class=\"paragraph\">Why it matters: activation scale is exactly the thing that moves in deployment, through quantization, precision changes, domain shift, and long-context drift. A normalization layer that is only calibrated to one scale is a bet that none of those happen. This notebook measures the bet. (The paper's page on alphaXiv also has an AI summary and a discussion tab if you want the fast overview before the deep dive.)</span></span>"
           }
         }
       ],
@@ -65,6 +65,32 @@
           "type": "data",
           "data": {
             "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"the-task-and-the-theorem\">The task, and the theorem</h2>\n<span class=\"paragraph\">We train on the induction/copy task (Olsson et al., 2022, \"In-context Learning and Induction Heads\"): a random sequence of distinct tokens, then the same sequence again. To predict the next token anywhere in the second half, the model has to notice \"I have seen this token before, what came right after it\" and copy the answer. No download, no labeled corpus, nothing beyond a random-number generator -- and even a two-layer attention model learns it reliably.</span>\n<span class=\"paragraph\">The theorem doing the work in this notebook is one line of algebra. For any input <marimo-tex class=\"arithmatex\">||(x||)</marimo-tex> and scalar <marimo-tex class=\"arithmatex\">||(c \\neq 0||)</marimo-tex>:</span>\n<marimo-tex class=\"arithmatex\">||[\n\\mathrm{LN}(cx) = \\frac{cx - \\mathrm{mean}(cx)}{\\mathrm{std}(cx)} = \\frac{c\\,(x - \\mathrm{mean}(x))}{|c|\\cdot \\mathrm{std}(x)} = \\mathrm{sign}(c) \\cdot \\mathrm{LN}(x)\n||]</marimo-tex><span class=\"paragraph\">Mean and standard deviation both scale by <marimo-tex class=\"arithmatex\">||(|c|||)</marimo-tex> and cancel. LayerNorm's output does not know or care what scale its input arrived at. DyT's <marimo-tex class=\"arithmatex\">||(\\tanh(\\alpha x)||)</marimo-tex> has no such cancellation: it is close to linear (so close to scale-<em>sensitive</em>) near the origin, and it saturates to <marimo-tex class=\"arithmatex\">||(\\pm 1||)</marimo-tex> far from it. <marimo-tex class=\"arithmatex\">||(\\alpha||)</marimo-tex> was fit once, at training time, to whatever scale the activations happened to have then. It is not a normalization in the algebraic sense at all -- it is a fixed nonlinearity that happened to sit in the right place for one particular input distribution.</span>\n<span class=\"paragraph\">Below: a two-dimensional stress test where the control is the result itself. The pad you drag is a heatmap of DyT's measured accuracy over the whole stress grid; every pixel under the puck is a real evaluation of the trained model. Horizontal: a global scale multiplier applied to every token. Vertical: how unevenly that scale is spread across tokens in the same sequence, an outlier-token simulator. Drag the puck and watch three views of the same trained models respond together.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "yBqY",
+      "code_hash": "6a4b301fabe2480a5a94374f501a5c0b",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<marimo-callout-output data-html='&quot;&#92;u003cspan class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&#92;u003e&#92;u003cspan class=&#92;&quot;paragraph&#92;&quot;&#92;u003e&#92;u003cstrong&#92;u003eHow to read this notebook.&#92;u003c/strong&#92;u003e Everything below is computed live by a model trained in this kernel. Drag the red puck on the accuracy map to stress the trained models; the three panels underneath react instantly (they index a precomputed grid, so no training run ever blocks a drag). Code is folded where it is plumbing; click the eye icon on any cell to open it.&#92;u003c/span&#92;u003e&#92;u003c/span&#92;u003e&quot;' data-kind='&quot;info&quot;'></marimo-callout-output>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Axyp",
+      "code_hash": "e726a6f5146b9402b5ce5d88ddf6025b",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<div style='display: flex;flex: 1;flex-direction: row;justify-content: space-between;align-items: normal;flex-wrap: wrap;gap: 0.75rem'><marimo-stat data-value='&quot;1.000&quot;' data-label='&quot;LayerNorm at 8x scale&quot;' data-caption='&quot;invariant, by theorem&quot;' data-bordered='true' data-target_direction='&quot;increase&quot;'></marimo-stat><marimo-stat data-value='&quot;1.000&quot;' data-label='&quot;DyT at training scale&quot;' data-caption='&quot;matches LayerNorm here&quot;' data-bordered='true' data-target_direction='&quot;increase&quot;'></marimo-stat><marimo-stat data-value='&quot;0.144&quot;' data-label='&quot;DyT at 8x scale&quot;' data-caption='&quot;the scale it forgot&quot;' data-direction='&quot;decrease&quot;' data-bordered='true' data-target_direction='&quot;increase&quot;'></marimo-stat><marimo-stat data-value='&quot;1.000&quot;' data-label='&quot;RMS-DyT at 8x scale&quot;' data-caption='&quot;the candidate fix&quot;' data-bordered='true' data-target_direction='&quot;increase&quot;'></marimo-stat><marimo-stat data-value='&quot;CUDA&quot;' data-label='&quot;compute&quot;' data-caption='&quot;25x13 stress grid x 3 models&quot;' data-bordered='true' data-target_direction='&quot;increase&quot;'></marimo-stat></div>"
           }
         }
       ],
@@ -247,6 +273,32 @@
           "type": "data",
           "data": {
             "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h3 id=\"what-this-does-and-does-not-show\">What this does and does not show</h3>\n<ul>\n<li>The induction task, the tiny transformer, and the training loop are all synthetic and built for this notebook; nothing here downloads a checkpoint or a dataset. That buys speed and reproducibility, not a claim that these exact numbers transfer to a billion-parameter language model. The paper's own experiments, at real scale, are the place to look for that.</li>\n<li>Every DyT <marimo-tex class=\"arithmatex\">||(\\alpha||)</marimo-tex> value in this notebook is learned by gradient descent on the unstressed task, exactly as the paper trains it, never hand-set to make a point. The fragility shown here is what training actually produces, not a worst-case <marimo-tex class=\"arithmatex\">||(\\alpha||)</marimo-tex> chosen to fail.</li>\n<li>\"Exact\" invariance for LayerNorm means exact up to the <marimo-tex class=\"arithmatex\">||(\\epsilon = 10^{-5}||)</marimo-tex> in its denominator: the measured LayerNorm gaps in panel C sit at floating-point scale, not literally zero.</li>\n<li>The rescale stress (a global multiplier times an independent per-token lognormal factor) is one specific, simple model of activation-scale drift. Real deployment-time distribution shift can look different: precision changes, sequence-length effects, domain shift, adversarial inputs. The mechanism this notebook demonstrates, a frozen scalar with no way to react to a shifted input scale, is general; the exact numbers are not a benchmark.</li>\n<li>The depth sweep uses a handful of seeds per configuration, enough to see whether a trend is there, not enough to report a tight confidence interval on it.</li>\n</ul></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Jbcm",
+      "code_hash": "b19a1801823ac5bac36852afc4ae2967",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h3 id=\"reproduction-check\">Reproduction check</h3>\n<table>\n<thead>\n<tr>\n<th></th>\n<th>claim</th>\n<th>source</th>\n<th>measured here</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>&#9989;</td>\n<td>alpha learned by gradient descent, never hand-set</td>\n<td>paper's training recipe</td>\n<td>same (see engine)</td>\n</tr>\n<tr>\n<td>&#9989;</td>\n<td>LayerNorm scale invariance LN(cx) = LN(x)</td>\n<td>exact by algebra</td>\n<td>accuracy 1.000 at 8x scale</td>\n</tr>\n<tr>\n<td>&#9989;</td>\n<td>DyT matches LayerNorm on-distribution</td>\n<td>paper's benchmark claim</td>\n<td>accuracy 1.000 at training scale</td>\n</tr>\n<tr>\n<td>&#9888;&#65039;</td>\n<td>DyT under input rescale (NOT tested in the paper)</td>\n<td>no claim made</td>\n<td>accuracy falls to 0.144 at 8x: this notebook's finding</td>\n</tr>\n<tr>\n<td>&#9989;</td>\n<td>RMS-DyT restores invariance</td>\n<td>predicted by the same algebra</td>\n<td>accuracy 1.000 at 8x</td>\n</tr>\n<tr>\n<td>&#9888;&#65039;</td>\n<td>fragility gap vs depth</td>\n<td>plausible hypothesis</td>\n<td>no clean monotonic trend across seeds; reported as measured</td>\n</tr>\n</tbody>\n</table>\n<span class=\"paragraph\">Check marks are reproductions of the paper or of the underlying algebra; warning rows are this notebook's own measurements beyond the paper's scope.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "kusk",
+      "code_hash": "2bc95f2a04f21404e535845658e64e4a",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><span class=\"paragraph\">Every number above came out of this kernel. The fastest way to feel the result is to break it yourself: drag the puck to the far right of the map and watch the histogram slide into the saturation zone. Go do that.</span>\n<h3 id=\"references\">References</h3>\n<ol>\n<li>Zhu, Chen, He, Yu, Yuille, LeCun. <em>Transformers without Normalization.</em> 2025. <a href=\"https://www.alphaxiv.org/abs/2503.10622\" rel=\"noopener noreferrer\" target=\"_blank\">alphaXiv 2503.10622</a></li>\n<li>Olsson et al. <em>In-context Learning and Induction Heads.</em> 2022. <a href=\"https://www.alphaxiv.org/abs/2209.11895\" rel=\"noopener noreferrer\" target=\"_blank\">arXiv 2209.11895</a></li>\n<li>Ba, Kiros, Hinton. <em>Layer Normalization.</em> 2016. <a href=\"https://www.alphaxiv.org/abs/1607.06450\" rel=\"noopener noreferrer\" target=\"_blank\">arXiv 1607.06450</a></li>\n</ol></span>"
           }
         }
       ],
