@@ -1,6 +1,9 @@
 # /// script
 # requires-python = ">=3.13"
 # dependencies = [
+#     "matplotlib>=3.11.0",
+#     "numpy>=2.5.1",
+#     "torch>=2.12.1",
 #     "wigglystuff==0.5.13",
 # ]
 # ///
@@ -10,8 +13,6 @@ import marimo
 __generated_with = "0.23.9"
 app = marimo.App(
     width="medium",
-    css_file="/usr/local/_marimo/custom.css",
-    auto_download=["html"],
 )
 
 
@@ -24,7 +25,7 @@ def title(mo):
 
     "Transformers without Normalization" (Zhu, Chen, He, Yu, Yuille, LeCun, 2025) replaces every LayerNorm in a transformer with one line: $\mathrm{DyT}(x) = \tanh(\alpha x) \odot \gamma + \beta$, where $\alpha$ is a single learned number per layer. It matches or beats LayerNorm across a wide range of benchmarks, and it is simpler and faster to run.
 
-    It also gives up a property LayerNorm has for free: $\mathrm{LN}(cx) = \mathrm{LN}(x)$ for any positive constant $c$, exactly, by algebra. Rescale the input to a LayerNorm and nothing downstream notices. Rescale the input to a DyT layer and $\alpha$, frozen the moment training ends, has no way to react. Below, we train a tiny transformer twice on the same task, once with each kind of layer, then push the input off the scale it trained on and watch what breaks -- and what doesn't.
+    It also gives up a property LayerNorm has for free: $\mathrm{LN}(cx) = \mathrm{LN}(x)$ for any positive constant $c$, exactly, by algebra. Rescale the input to a LayerNorm and nothing downstream notices. Rescale the input to a DyT layer and $\alpha$, frozen the moment training ends, has no way to react. Below, we train a tiny transformer twice on the same task, once with each kind of layer, then push the input off the scale it trained on and watch what breaks, and what doesn't.
     """)
     return
 
@@ -47,12 +48,13 @@ def imports():
     import torch.nn.functional as F
     import matplotlib.pyplot as plt
     from matplotlib.figure import Figure
-    from wigglystuff import Slider2D
-
-    return F, Figure, Slider2D, dataclasses, nn, np, plt, time, torch
+    from wigglystuff import ChartPuck
 
 
-@app.cell
+    return ChartPuck, F, Figure, dataclasses, nn, np, plt, time, torch
+
+
+@app.cell(hide_code=True)
 def engine(F, dataclasses, nn, np, time, torch):
     # DyT stress-test engine: the three norm sites (LayerNorm / DyT / RMS-DyT),
     # a tiny transformer, the induction/copy task, the rescale-stress harness,
@@ -821,7 +823,7 @@ def setup_md(mo):
 
     Mean and standard deviation both scale by $|c|$ and cancel. LayerNorm's output does not know or care what scale its input arrived at. DyT's $\tanh(\alpha x)$ has no such cancellation: it is close to linear (so close to scale-*sensitive*) near the origin, and it saturates to $\pm 1$ far from it. $\alpha$ was fit once, at training time, to whatever scale the activations happened to have then. It is not a normalization in the algebraic sense at all -- it is a fixed nonlinearity that happened to sit in the right place for one particular input distribution.
 
-    Below: a two-dimensional stress test on a single drag pad. Horizontal: a global scale multiplier applied to every token. Vertical: how unevenly that scale is spread across tokens in the same sequence, an outlier-token simulator. Drag it and watch three views of the same trained models respond together.
+    Below: a two-dimensional stress test where the control is the result itself. The pad you drag is a heatmap of DyT's measured accuracy over the whole stress grid; every pixel under the puck is a real evaluation of the trained model. Horizontal: a global scale multiplier applied to every token. Vertical: how unevenly that scale is spread across tokens in the same sequence, an outlier-token simulator. Drag the puck and watch three views of the same trained models respond together.
     """)
     return
 
@@ -845,8 +847,8 @@ def device_setup(default_config, mo, pick_device):
 @app.cell
 def sweep_params(mo, np):
     HERO_DEPTH = 4
-    LOG2_MULTS = np.linspace(-3.0, 3.0, 13)
-    SIGMAS = np.linspace(0.0, 1.5, 7)
+    LOG2_MULTS = np.linspace(-3.0, 3.0, 25)
+    SIGMAS = np.linspace(0.0, 1.5, 13)
     DEPTH_LIST = [2, 4, 6]
     NORM_LIST = ["layernorm", "dyt", "rms_dyt"]
     SEED_LIST = [0, 1, 2]
@@ -861,6 +863,7 @@ def sweep_params(mo, np):
         f"depth sweep: {len(DEPTH_LIST)} depths x {len(NORM_LIST)} norms x "
         f"{len(SEED_LIST)} seeds = {_n_depth} training runs."
     )
+
     return (
         DEPTH_LIST,
         HERO_DEPTH,
@@ -919,6 +922,7 @@ def invariance_compute(
     config,
     ln_invariance_gap,
     make_norm,
+    mo,
     np,
     torch,
 ):
@@ -932,9 +936,15 @@ def invariance_compute(
     for _name in NORM_LIST:
         _site = make_norm(_name, config.d_model, config)
         invariance_demo[_name] = np.array(
-            [ln_invariance_gap(_site, _x_demo, float(2.0**_lm)) for _lm in invariance_demo_mults]
+            [
+                ln_invariance_gap(_site, _x_demo, float(2.0**_lm))
+                for _lm in invariance_demo_mults
+            ]
         )
-    f"invariance demo ready: {len(NORM_LIST)} norm kinds x {len(invariance_demo_mults)} multipliers"
+    mo.md(
+        f"invariance check ready: {len(NORM_LIST)} norm kinds x "
+        f"{len(invariance_demo_mults)} multipliers, measured on a fresh random tensor"
+    )
 
     return invariance_demo, invariance_demo_mults
 
@@ -969,39 +979,78 @@ def rescale_grid_compute(
         with mo.status.spinner(
             title=f"sweeping {len(LOG2_MULTS)}x{len(SIGMAS)} rescale grid x {len(NORM_LIST)} models ..."
         ):
-            rescale_grid = rescale_response_grid(hero_models, hero_config, LOG2_MULTS, SIGMAS, seed=0, device=device)
+            rescale_grid = rescale_response_grid(
+                hero_models, hero_config, LOG2_MULTS, SIGMAS, seed=0, device=device
+            )
         with open(_grid_path, "wb") as _f:
             _pickle.dump(rescale_grid, _f)
 
     _shape = rescale_grid.accuracy["dyt"].shape
-    f"rescale grid ready: {_shape[0]} multipliers x {_shape[1]} sigmas, cached at {_grid_path}"
+    mo.md(
+        f"rescale grid ready: {_shape[0]} multipliers x {_shape[1]} sigmas x {len(NORM_LIST)} norms, "
+        "computed once and reused; the pad and panels below only index into it"
+    )
 
     return (rescale_grid,)
 
 
 @app.cell
-def pad_ui(LOG2_MULTS, SIGMAS, Slider2D, mo):
+def pad_ui(ChartPuck, Figure, mo, rescale_grid):
+    # The control surface IS the result chart: a heatmap of DyT's measured
+    # accuracy over the whole stress grid, with a draggable puck on top.
+    # Built with the OO Figure API so re-renders never touch pyplot's registry.
+    _acc_map = rescale_grid.accuracy["dyt"]
+    _x_lo = float(rescale_grid.log2_multipliers[0])
+    _x_hi = float(rescale_grid.log2_multipliers[-1])
+    _y_lo = float(rescale_grid.sigmas[0])
+    _y_hi = float(rescale_grid.sigmas[-1])
+
+    _pfig = Figure(figsize=(5.0, 4.4), dpi=100)
+    _pax = _pfig.subplots()
+    _pim = _pax.imshow(
+        _acc_map.T,
+        origin="lower",
+        aspect="auto",
+        extent=[_x_lo, _x_hi, _y_lo, _y_hi],
+        cmap="viridis",
+        vmin=0.0,
+        vmax=1.0,
+    )
+    _pfig.colorbar(_pim, ax=_pax, label="DyT induction accuracy")
+    _pax.set_xlabel("log2(global scale multiplier)")
+    _pax.set_ylabel("per-token heterogeneity (sigma)")
+    _pax.set_title("DyT accuracy across the stress grid (drag the puck)")
+    _pfig.tight_layout()
+
     scale_pad = mo.ui.anywidget(
-        Slider2D(
-            x=0.0, y=0.0,
-            x_bounds=(float(LOG2_MULTS.min()), float(LOG2_MULTS.max())),
-            y_bounds=(float(SIGMAS.min()), float(SIGMAS.max())),
-            width=320, height=320,
+        ChartPuck(
+            _pfig,
+            x=0.0,
+            y=0.0,
+            puck_color="#e63946",
+            throttle=80,
+            drag_x_bounds=(_x_lo, _x_hi),
+            drag_y_bounds=(_y_lo, _y_hi),
         )
     )
     mo.hstack(
         [
             scale_pad,
             mo.md(
-                "**the stress pad**"
-                + chr(10) * 2 + "horizontal: global scale, log2(multiplier) in [-3, 3]"
-                + chr(10) * 2 + "vertical: per-token heterogeneity, sigma in [0, 1.5]"
-                + chr(10) * 2 + "Drag anywhere. The panels snap to the nearest precomputed grid point,"
-                + " so no forward pass ever runs on a drag."
+                "**the stress pad is the accuracy map itself**"
+                + chr(10) * 2
+                + f"The heatmap under the puck is DyT's measured induction accuracy over the whole grid: {_acc_map.shape[0]} multipliers x {_acc_map.shape[1]} heterogeneity levels, every cell a real forward pass of the trained model. The bright ridge is the scale it trained at; everything darker is what it forgot."
+                + chr(10) * 2
+                + "horizontal: global scale, log2(multiplier) in [-3, 3]"
+                + chr(10) * 2
+                + "vertical: per-token heterogeneity, sigma in [0, 1.5]"
+                + chr(10) * 2
+                + "Drag the puck anywhere. The three panels below snap to the nearest precomputed grid point, so no forward pass ever runs on a drag."
             ),
         ],
         gap=1.5,
     )
+
     return (scale_pad,)
 
 
@@ -1017,59 +1066,104 @@ def linked_panels(
     scale_pad,
 ):
     # Pure indexing into rescale_grid / invariance_demo -- zero forward
-    # passes fire here, no matter how the sliders move.
-    _mi = int(np.argmin(np.abs(rescale_grid.log2_multipliers - float(scale_pad.value["x"]))))
-    _si = int(np.argmin(np.abs(rescale_grid.sigmas - float(scale_pad.value["y"]))))
+    # passes fire here, no matter how the puck moves.
+    _pv = scale_pad.value if isinstance(scale_pad.value, dict) else {}
+    _px = _pv.get("x") or [0.0]
+    _py = _pv.get("y") or [0.0]
+    _mi = int(np.argmin(np.abs(rescale_grid.log2_multipliers - float(_px[0]))))
+    _si = int(np.argmin(np.abs(rescale_grid.sigmas - float(_py[0]))))
     _mult_here = float(2.0 ** rescale_grid.log2_multipliers[_mi])
     _sigma_here = float(rescale_grid.sigmas[_si])
 
-    # This cell re-runs on every slider drag. Build the figure with the
+    # This cell re-runs on every puck drag. Build the figure with the
     # object-oriented Figure() API rather than plt.subplots so it never enters
     # pyplot's global figure registry -- otherwise each drag leaks a figure
     # ("more than 20 figures" warning + steady memory growth on the showpiece).
-    _fig3 = Figure(figsize=(16, 4.6))
+    _fig3 = Figure(figsize=(13.5, 4.6))
     _axA, _axB, _axC = _fig3.subplots(1, 3)
 
     # panel A: accuracy vs multiplier, reference curves at a few sigma slices,
-    # live dot at the current pad position
-    _sigma_ref_idx = sorted({0, len(rescale_grid.sigmas) // 2, len(rescale_grid.sigmas) - 1})
+    # live dot at the current puck position
+    _sigma_ref_idx = sorted(
+        {0, len(rescale_grid.sigmas) // 2, len(rescale_grid.sigmas) - 1}
+    )
     for _sj in _sigma_ref_idx:
         _axA.plot(
-            rescale_grid.log2_multipliers, rescale_grid.accuracy["dyt"][:, _sj],
+            rescale_grid.log2_multipliers,
+            rescale_grid.accuracy["dyt"][:, _sj],
             label=f"DyT, sigma={rescale_grid.sigmas[_sj]:.2f}",
-            alpha=1.0 if _sj == _si else 0.5, linewidth=2.4 if _sj == _si else 1.3,
+            alpha=1.0 if _sj == _si else 0.5,
+            linewidth=2.4 if _sj == _si else 1.3,
         )
     _axA.plot(
-        rescale_grid.log2_multipliers, rescale_grid.accuracy["layernorm"][:, 0],
-        "--", color="black", linewidth=1.8, label="LayerNorm (flat at every sigma)",
+        rescale_grid.log2_multipliers,
+        rescale_grid.accuracy["layernorm"][:, 0],
+        "--",
+        color="black",
+        linewidth=1.8,
+        label="LayerNorm, sigma=0.00",
     )
     _axA.plot(
-        [rescale_grid.log2_multipliers[_mi]], [rescale_grid.accuracy["dyt"][_mi, _si]],
-        "o", color="crimson", markersize=12, zorder=5, label="you are here",
+        rescale_grid.log2_multipliers,
+        rescale_grid.accuracy["layernorm"][:, -1],
+        "--",
+        color="dimgray",
+        linewidth=1.2,
+        label=f"LayerNorm, sigma={rescale_grid.sigmas[-1]:.2f} (still flat)",
+    )
+    _axA.plot(
+        [rescale_grid.log2_multipliers[_mi]],
+        [rescale_grid.accuracy["dyt"][_mi, _si]],
+        "o",
+        color="crimson",
+        markersize=12,
+        zorder=5,
+        label="you are here",
     )
     _axA.axhline(chance_accuracy(config), linestyle=":", color="gray", linewidth=1)
     _axA.set_xlabel("log2(global scale multiplier)")
     _axA.set_ylabel("induction accuracy")
     _axA.set_ylim(-0.05, 1.05)
     _axA.set_title("accuracy vs. scale (live dot)")
-    _axA.legend(fontsize=7, loc="lower center")
+    _axA.legend(fontsize=8, loc="lower center")
 
-    # panel B: pre-tanh histogram at the current pad position, saturation
+    # panel B: pre-tanh histogram at the current puck position, saturation
     # zone shaded
     _edges = rescale_grid.hist_edges
     _centers = 0.5 * (_edges[:-1] + _edges[1:])
-    _axB.bar(_centers, rescale_grid.hist["dyt"][_mi, _si], width=(_edges[1] - _edges[0]), color="steelblue")
+    _axB.bar(
+        _centers,
+        rescale_grid.hist["dyt"][_mi, _si],
+        width=(_edges[1] - _edges[0]),
+        color="steelblue",
+    )
     _thr = rescale_grid.saturation_threshold
     _axB.axvspan(_edges[0], -_thr, color="crimson", alpha=0.12)
-    _axB.axvspan(_thr, _edges[-1], color="crimson", alpha=0.12, label="tanh saturation zone")
-    _axB.set_xlabel("alpha * x  (pre-tanh, first norm site)")
+    _axB.axvspan(
+        _thr, _edges[-1], color="crimson", alpha=0.12, label="tanh saturation zone"
+    )
+    _axB.set_xlabel(
+        f"alpha * x  (pre-tanh, first norm site; histogram clipped at +-{_edges[-1]:g})"
+    )
     _axB.set_ylabel("token count")
-    _axB.set_title(f"DyT pre-tanh distribution\n(mult={_mult_here:.2f}, sigma={_sigma_here:.2f})")
-    _axB.legend(fontsize=7)
+    _axB.set_title(
+        f"DyT pre-tanh distribution\n(mult={_mult_here:.2f}, sigma={_sigma_here:.2f})"
+    )
+    _axB.legend(fontsize=8)
 
     # panel C: the invariance theorem itself, precomputed, marker at current mult
-    for _name, _color in (("layernorm", "black"), ("dyt", "crimson"), ("rms_dyt", "seagreen")):
-        _axC.plot(invariance_demo_mults, invariance_demo[_name], label=_name, color=_color, linewidth=2)
+    for _name, _color in (
+        ("layernorm", "black"),
+        ("dyt", "crimson"),
+        ("rms_dyt", "seagreen"),
+    ):
+        _axC.plot(
+            invariance_demo_mults,
+            invariance_demo[_name],
+            label=_name,
+            color=_color,
+            linewidth=2,
+        )
     _axC.axvline(float(rescale_grid.log2_multipliers[_mi]), linestyle=":", color="gray")
     _axC.set_xlabel("log2(multiplier)")
     _axC.set_ylabel("max |value(mult*x) - value(x)|")
@@ -1078,6 +1172,7 @@ def linked_panels(
 
     _fig3.tight_layout()
     _fig3
+
     return
 
 
@@ -1127,14 +1222,23 @@ def depth_sweep_compute(
             title=f"depth sweep: {len(DEPTH_LIST)} depths x {len(NORM_LIST)} norms x {len(SEED_LIST)} seeds",
         ) as _bar:
             depth_sweep_rows = depth_fragility_sweep(
-                config, DEPTH_LIST, NORM_LIST, SEED_LIST, STRESS_MULT, STRESS_SIGMA, device,
+                config,
+                DEPTH_LIST,
+                NORM_LIST,
+                SEED_LIST,
+                STRESS_MULT,
+                STRESS_SIGMA,
+                device,
                 progress=lambda done, total: _bar.update(),
             )
         with open(_depth_path, "wb") as _f:
             _pickle2.dump(depth_sweep_rows, _f)
 
     _n_diverged = sum(1 for r in depth_sweep_rows if r["diverged"])
-    f"depth sweep: {len(depth_sweep_rows)} runs cached at {_depth_path} ({_n_diverged} diverged)"
+    mo.md(
+        f"depth sweep ready: {len(depth_sweep_rows)} independent training runs, "
+        f"{_n_diverged} diverged"
+    )
 
     return (depth_sweep_rows,)
 
@@ -1200,23 +1304,39 @@ def depth_caption(mo):
 def rms_fix_display(chance_accuracy, config, plt, rescale_grid):
     _fig5, _axR = plt.subplots(figsize=(9, 5.6))
     _sigma_lo, _sigma_hi = 0, len(rescale_grid.sigmas) // 2
-    for _name, _color in (("layernorm", "black"), ("dyt", "crimson"), ("rms_dyt", "seagreen")):
+    for _name, _color in (
+        ("layernorm", "black"),
+        ("dyt", "crimson"),
+        ("rms_dyt", "seagreen"),
+    ):
         _axR.plot(
-            rescale_grid.log2_multipliers, rescale_grid.accuracy[_name][:, _sigma_lo],
-            "-", color=_color, linewidth=2.4, label=f"{_name}, sigma={rescale_grid.sigmas[_sigma_lo]:.2f}",
+            rescale_grid.log2_multipliers,
+            rescale_grid.accuracy[_name][:, _sigma_lo],
+            "-",
+            color=_color,
+            linewidth=2.4,
+            label=f"{_name}, sigma={rescale_grid.sigmas[_sigma_lo]:.2f}",
         )
         _axR.plot(
-            rescale_grid.log2_multipliers, rescale_grid.accuracy[_name][:, _sigma_hi],
-            "--", color=_color, linewidth=1.6, alpha=0.7, label=f"{_name}, sigma={rescale_grid.sigmas[_sigma_hi]:.2f}",
+            rescale_grid.log2_multipliers,
+            rescale_grid.accuracy[_name][:, _sigma_hi],
+            "--",
+            color=_color,
+            linewidth=1.6,
+            alpha=0.7,
+            label=f"{_name}, sigma={rescale_grid.sigmas[_sigma_hi]:.2f}",
         )
-    _axR.axhline(chance_accuracy(config), linestyle=":", color="gray", linewidth=1, label="chance")
+    _axR.axhline(
+        chance_accuracy(config), linestyle=":", color="gray", linewidth=1, label="chance"
+    )
     _axR.set_xlabel("log2(global scale multiplier)")
     _axR.set_ylabel("induction accuracy")
     _axR.set_ylim(-0.05, 1.05)
     _axR.set_title("the candidate fix: divide by per-token RMS before tanh")
-    _axR.legend(fontsize=7, ncol=2, loc="lower center")
+    _axR.legend(fontsize=8, ncol=2, loc="lower center")
     _fig5.tight_layout()
     _fig5
+
     return
 
 
@@ -1239,6 +1359,7 @@ def guardrails(mo):
 
     - The induction task, the tiny transformer, and the training loop are all synthetic and built for this notebook; nothing here downloads a checkpoint or a dataset. That buys speed and reproducibility, not a claim that these exact numbers transfer to a billion-parameter language model. The paper's own experiments, at real scale, are the place to look for that.
     - Every DyT $\alpha$ value in this notebook is learned by gradient descent on the unstressed task, exactly as the paper trains it, never hand-set to make a point. The fragility shown here is what training actually produces, not a worst-case $\alpha$ chosen to fail.
+    - "Exact" invariance for LayerNorm means exact up to the $\epsilon = 10^{-5}$ in its denominator: the measured LayerNorm gaps in panel C sit at floating-point scale, not literally zero.
     - The rescale stress (a global multiplier times an independent per-token lognormal factor) is one specific, simple model of activation-scale drift. Real deployment-time distribution shift can look different: precision changes, sequence-length effects, domain shift, adversarial inputs. The mechanism this notebook demonstrates, a frozen scalar with no way to react to a shifted input scale, is general; the exact numbers are not a benchmark.
     - The depth sweep uses a handful of seeds per configuration, enough to see whether a trend is there, not enough to report a tight confidence interval on it.
     """)
