@@ -7,12 +7,12 @@
   "cells": [
     {
       "id": "Hbol",
-      "code_hash": "a3101d042887a64266e2236e09e12334",
+      "code_hash": "cdc33ba575501cf4c151c27edc04fd0b",
       "outputs": [
         {
           "type": "data",
           "data": {
-            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h1 id=\"the-scale-dyt-forgot\">The Scale DyT Forgot</h1>\n<span class=\"paragraph\">LayerNorm has a theorem behind it. DyT has a fitted curve.</span>\n<span class=\"paragraph\">\"Transformers without Normalization\" (Zhu, Chen, He, Yu, Yuille, LeCun, 2025) replaces every LayerNorm in a transformer with one line: <marimo-tex class=\"arithmatex\">||(\\mathrm{DyT}(x) = \\tanh(\\alpha x) \\odot \\gamma + \\beta||)</marimo-tex>, where <marimo-tex class=\"arithmatex\">||(\\alpha||)</marimo-tex> is a single learned number per layer. It matches or beats LayerNorm across a wide range of benchmarks, and it is simpler and faster to run.</span>\n<span class=\"paragraph\">It also gives up a property LayerNorm has for free: <marimo-tex class=\"arithmatex\">||(\\mathrm{LN}(cx) = \\mathrm{LN}(x)||)</marimo-tex> for any positive constant <marimo-tex class=\"arithmatex\">||(c||)</marimo-tex>, exactly, by algebra. Rescale the input to a LayerNorm and nothing downstream notices. Rescale the input to a DyT layer and <marimo-tex class=\"arithmatex\">||(\\alpha||)</marimo-tex>, frozen the moment training ends, has no way to react. Below, we train a tiny transformer twice on the same task, once with each kind of layer, then push the input off the scale it trained on and watch what breaks, and what doesn't.</span></span>"
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h1 id=\"the-scale-dyt-forgot\">The Scale DyT Forgot</h1>\n<span class=\"paragraph\">LayerNorm has a theorem behind it. DyT has a fitted curve.</span>\n<span class=\"paragraph\"><strong>Paper:</strong> <a href=\"https://www.alphaxiv.org/abs/2503.10622\" rel=\"noopener noreferrer\" target=\"_blank\">\"Transformers without Normalization\"</a> (Zhu, Chen, He, Yu, Yuille, LeCun, 2025, arXiv 2503.10622) replaces every LayerNorm in a transformer with one line: <marimo-tex class=\"arithmatex\">||(\\mathrm{DyT}(x) = \\tanh(\\alpha x) \\odot \\gamma + \\beta||)</marimo-tex>, where <marimo-tex class=\"arithmatex\">||(\\alpha||)</marimo-tex> is a single learned number per layer. It matches or beats LayerNorm across a wide range of benchmarks, and it is simpler and faster to run.</span>\n<span class=\"paragraph\">It also gives up a property LayerNorm has for free: <marimo-tex class=\"arithmatex\">||(\\mathrm{LN}(cx) = \\mathrm{LN}(x)||)</marimo-tex> for any positive constant <marimo-tex class=\"arithmatex\">||(c||)</marimo-tex>, exactly, by algebra. Rescale the input to a LayerNorm and nothing downstream notices. Rescale the input to a DyT layer and <marimo-tex class=\"arithmatex\">||(\\alpha||)</marimo-tex>, frozen the moment training ends, has no way to react. Below, we train a tiny transformer twice on the same task, once with each kind of layer, then push the input off the scale it trained on and watch what breaks, and what doesn't.</span></span>"
           }
         }
       ],
@@ -178,7 +178,14 @@
           }
         }
       ],
-      "console": []
+      "console": [
+        {
+          "type": "stream",
+          "name": "stderr",
+          "text": "[I 260708 12:31:19 handlers:31] Interrupt request received\n",
+          "mimetype": "text/plain"
+        }
+      ]
     },
     {
       "id": "iLit",

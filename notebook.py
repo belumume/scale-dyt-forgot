@@ -23,10 +23,11 @@ def title(mo):
 
     LayerNorm has a theorem behind it. DyT has a fitted curve.
 
-    "Transformers without Normalization" (Zhu, Chen, He, Yu, Yuille, LeCun, 2025) replaces every LayerNorm in a transformer with one line: $\mathrm{DyT}(x) = \tanh(\alpha x) \odot \gamma + \beta$, where $\alpha$ is a single learned number per layer. It matches or beats LayerNorm across a wide range of benchmarks, and it is simpler and faster to run.
+    **Paper:** ["Transformers without Normalization"](https://www.alphaxiv.org/abs/2503.10622) (Zhu, Chen, He, Yu, Yuille, LeCun, 2025, arXiv 2503.10622) replaces every LayerNorm in a transformer with one line: $\mathrm{DyT}(x) = \tanh(\alpha x) \odot \gamma + \beta$, where $\alpha$ is a single learned number per layer. It matches or beats LayerNorm across a wide range of benchmarks, and it is simpler and faster to run.
 
     It also gives up a property LayerNorm has for free: $\mathrm{LN}(cx) = \mathrm{LN}(x)$ for any positive constant $c$, exactly, by algebra. Rescale the input to a LayerNorm and nothing downstream notices. Rescale the input to a DyT layer and $\alpha$, frozen the moment training ends, has no way to react. Below, we train a tiny transformer twice on the same task, once with each kind of layer, then push the input off the scale it trained on and watch what breaks, and what doesn't.
     """)
+
     return
 
 
@@ -863,7 +864,6 @@ def sweep_params(mo, np):
         f"depth sweep: {len(DEPTH_LIST)} depths x {len(NORM_LIST)} norms x "
         f"{len(SEED_LIST)} seeds = {_n_depth} training runs."
     )
-
     return (
         DEPTH_LIST,
         HERO_DEPTH,
@@ -945,7 +945,6 @@ def invariance_compute(
         f"invariance check ready: {len(NORM_LIST)} norm kinds x "
         f"{len(invariance_demo_mults)} multipliers, measured on a fresh random tensor"
     )
-
     return invariance_demo, invariance_demo_mults
 
 
@@ -990,7 +989,6 @@ def rescale_grid_compute(
         f"rescale grid ready: {_shape[0]} multipliers x {_shape[1]} sigmas x {len(NORM_LIST)} norms, "
         "computed once and reused; the pad and panels below only index into it"
     )
-
     return (rescale_grid,)
 
 
@@ -1050,7 +1048,6 @@ def pad_ui(ChartPuck, Figure, mo, rescale_grid):
         ],
         gap=1.5,
     )
-
     return (scale_pad,)
 
 
@@ -1172,7 +1169,6 @@ def linked_panels(
 
     _fig3.tight_layout()
     _fig3
-
     return
 
 
@@ -1239,7 +1235,6 @@ def depth_sweep_compute(
         f"depth sweep ready: {len(depth_sweep_rows)} independent training runs, "
         f"{_n_diverged} diverged"
     )
-
     return (depth_sweep_rows,)
 
 
@@ -1336,7 +1331,6 @@ def rms_fix_display(chance_accuracy, config, plt, rescale_grid):
     _axR.legend(fontsize=8, ncol=2, loc="lower center")
     _fig5.tight_layout()
     _fig5
-
     return
 
 
