@@ -1491,6 +1491,23 @@ def closer_refs(mo):
     mo.md(r"""
     Every number above came out of this kernel. The fastest way to feel the result is to break it yourself: drag the puck to the far right of the map and watch the histogram slide into the saturation zone. Go do that.
 
+
+    ### Three edges of stability
+
+    This notebook is one of three, each built on a different paper, each a view of
+    the same edge.
+
+    - **The Scale DyT Forgot** (you are here). A frozen learned scalar pins where
+      the stability edge sits relative to your input scale. Move the scale, and the
+      network falls off an edge it can no longer feel.
+    - **[The Coastline That Never Smooths](https://molab.marimo.io/notebooks/nb_SZ6ifRSGVy1kQY8b5yXrax)**. That edge, seen from above, is
+      a fractal coastline in hyperparameter space. Every pixel is a real training
+      run.
+    - **[On the Wire](https://molab.marimo.io/notebooks/nb_QtxPsWxaZSpnRU2J8qWZWm)**. Training does not avoid the edge. It climbs until
+      sharpness pins at 2/eta and rides there while the loss keeps falling.
+
+    The calibration, the map, and the ride. One edge, three ways to fall off it.
+
     ### References
 
     1. Zhu, Chen, He, Yu, Yuille, LeCun. *Transformers without Normalization.* 2025. [alphaXiv 2503.10622](https://www.alphaxiv.org/abs/2503.10622)
