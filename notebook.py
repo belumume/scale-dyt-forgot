@@ -1452,7 +1452,7 @@ def repro_check(mo, np, rescale_grid):
             "&#9888;&#65039;",
             "DyT under input rescale (NOT tested in the paper)",
             "no claim made",
-            f"accuracy falls to {_acc2['dyt'][-1, 0]:.3f} at 8x: this notebook's finding",
+            f"accuracy falls to {_acc2['dyt'][-1, 0]:.3f} at 8x this run: this notebook's finding",
         ),
         (
             "&#9989;",
@@ -1477,7 +1477,10 @@ def repro_check(mo, np, rescale_grid):
                 *[f"| {a} | {b} | {c} | {d} |" for a, b, c, d in _rows],
                 "",
                 "Check marks are reproductions of the paper or of the underlying algebra; "
-                "warning rows are this notebook's own measurements beyond the paper's scope.",
+                "warning rows are this notebook's own measurements beyond the paper's scope. "
+                "The post-cliff magnitude at 8x varies from run to run (GPU training is not "
+                "bit-deterministic), so that digit will differ across kernel restarts; the "
+                "collapse itself, and LayerNorm and RMS-DyT holding flat, are the stable findings.",
             ]
         )
     )
